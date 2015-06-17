@@ -430,6 +430,7 @@ public final class Main {
       String... args)
       throws IOException, InterruptedException {
 
+    System.out.println("in runMainWithExitCode");
     Verbosity verbosity = VerbosityParser.parse(args);
     Optional<String> color;
     final boolean isDaemon = context.isPresent();

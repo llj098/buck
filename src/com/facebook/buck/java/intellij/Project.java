@@ -382,6 +382,7 @@ public class Project {
       }
     }
 
+
     // src dependencies
     // Note that isForTests is false even if projectRule is the project_config's test_target.
     walkRuleAndAdd(
@@ -487,11 +488,11 @@ public class Project {
   private Path resolveAndroidManifestRelativePath(Path basePath) {
     Path fallbackManifestPath = resolveAndroidManifestFileRelativePath(basePath);
     Path manifestPath = intellijConfig.getAndroidManifest().orNull();
-
     if (manifestPath != null) {
       Path path = basePath.resolve(manifestPath);
       return projectFilesystem.exists(path) ? manifestPath : fallbackManifestPath;
     }
+
     return fallbackManifestPath;
   }
 
@@ -971,6 +972,8 @@ public class Project {
       PrebuiltJar prebuiltJar = (PrebuiltJar) libraryJar;
 
       String binaryJar = resolver.getPath(prebuiltJar.getBinaryJar()).toString();
+      binaryJar = binaryJar.replaceAll("buck-out/gen/", "")
+          .replaceAll("jars__", "").replaceAll(".jar$", "");
       String sourceJar = null;
       if (prebuiltJar.getSourceJar().isPresent()) {
         sourceJar = prebuiltJar.getSourceJar().get().toString();

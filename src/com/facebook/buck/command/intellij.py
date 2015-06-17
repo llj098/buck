@@ -16,7 +16,9 @@ MISC_XML = """<?xml version="1.0" encoding="UTF-8"?>
     assert-keyword="true"
     jdk-15="true"
     project-jdk-name="%(project_jdk_name)s"
-    project-jdk-type="%(project_jdk_type)s" />
+    project-jdk-type="%(project_jdk_type)s" >
+    <output url="file://$PROJECT_DIR$/buck-out/il-out" />
+  </component>
 </project>"""
 
 MODULE_XML_START = """<?xml version="1.0" encoding="UTF-8"?>
