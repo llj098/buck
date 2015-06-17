@@ -15,9 +15,9 @@
  */
 package com.facebook.buck.android;
 
+import com.facebook.buck.cxx.CxxHeaders;
 import com.facebook.buck.cxx.CxxPlatform;
 import com.facebook.buck.cxx.CxxPreprocessables;
-import com.facebook.buck.cxx.CxxPreprocessorDep;
 import com.facebook.buck.cxx.CxxPreprocessorInput;
 import com.facebook.buck.cxx.CxxSource;
 import com.facebook.buck.cxx.Linker;
@@ -182,10 +182,8 @@ public class NdkLibraryDescription implements Description<NdkLibraryDescription.
             CxxPreprocessables.getTransitiveCxxPreprocessorInput(
                 cxxPlatform,
                 params.getDeps(),
-                Predicates.or(
-                    Predicates.instanceOf(CxxPreprocessorDep.class),
-                    Predicates.instanceOf(NdkLibrary.class))));
-      } catch (CxxPreprocessorInput.ConflictingHeadersException e) {
+                Predicates.instanceOf(NdkLibrary.class)));
+      } catch (CxxHeaders.ConflictingHeadersException e) {
         throw e.getHumanReadableExceptionForBuildTarget(params.getBuildTarget());
       }
 

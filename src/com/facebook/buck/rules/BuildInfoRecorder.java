@@ -81,7 +81,6 @@ public class BuildInfoRecorder {
   private final BuildId buildId;
   private final ImmutableMap<String, String> artifactExtraData;
   private final Map<String, String> metadataToWrite;
-  private final RuleKey ruleKey;
 
   /**
    * Every value in this set is a path relative to the project root.
@@ -114,7 +113,6 @@ public class BuildInfoRecorder {
     metadataToWrite.put(BuildInfo.METADATA_KEY_FOR_RULE_KEY_WITHOUT_DEPS,
         rukeKeyWithoutDeps.toString());
 
-    this.ruleKey = ruleKey;
     this.pathsToOutputs = Sets.newHashSet();
   }
 
@@ -222,7 +220,10 @@ public class BuildInfoRecorder {
   /**
    * Creates a zip file of the metadata and recorded artifacts and stores it in the artifact cache.
    */
-  public void performUploadToArtifactCache(ArtifactCache artifactCache, BuckEventBus eventBus)
+  public void performUploadToArtifactCache(
+      ImmutableSet<RuleKey> ruleKeys,
+      ArtifactCache artifactCache,
+      BuckEventBus eventBus)
       throws InterruptedException {
 
     // Skip all of this if caching is disabled. Although artifactCache.store() will be a noop,
@@ -234,7 +235,7 @@ public class BuildInfoRecorder {
     eventBus.post(
         ArtifactCacheEvent.started(
             ArtifactCacheEvent.Operation.COMPRESS,
-            ruleKey));
+            ruleKeys));
 
     String additionalArtifactInfo =
         formatAdditionalArtifactInfo(
@@ -267,9 +268,9 @@ public class BuildInfoRecorder {
       eventBus.post(
           ArtifactCacheEvent.finished(
               ArtifactCacheEvent.Operation.COMPRESS,
-              ruleKey));
+              ruleKeys));
     }
-    artifactCache.store(ruleKey, zip);
+    artifactCache.store(ruleKeys, zip);
     zip.delete();
   }
 
@@ -277,7 +278,10 @@ public class BuildInfoRecorder {
    * Fetches the artifact associated with the {@link #buildTarget} for this class and writes it to
    * the specified {@code outputFile}.
    */
-  public CacheResult fetchArtifactForBuildable(File outputFile, ArtifactCache artifactCache)
+  public CacheResult fetchArtifactForBuildable(
+      RuleKey ruleKey,
+      File outputFile,
+      ArtifactCache artifactCache)
       throws InterruptedException {
     return artifactCache.fetch(ruleKey, outputFile);
   }

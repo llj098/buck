@@ -23,7 +23,6 @@ import static org.junit.Assert.assertNotEquals;
 import static org.junit.Assert.assertTrue;
 
 import com.facebook.buck.event.BuckEventBusFactory;
-import com.facebook.buck.graph.MutableDirectedGraph;
 import com.facebook.buck.io.MorePaths;
 import com.facebook.buck.io.ProjectFilesystem;
 import com.facebook.buck.java.JavaPackageFinder;
@@ -155,9 +154,11 @@ public class ExportFileTest {
     assertIterablesEquals(singleton(Paths.get("chips")), exportFile.getSource());
 
     BuildRuleResolver ruleResolver = new BuildRuleResolver();
-    FakeBuildRule rule = new FakeBuildRule(
-        BuildTargetFactory.newInstance("//example:one"),
-        new SourcePathResolver(ruleResolver));
+    FakeBuildRule rule =
+        ruleResolver.addToIndex(
+            new FakeBuildRule(
+                BuildTargetFactory.newInstance("//example:one"),
+                new SourcePathResolver(ruleResolver)));
 
     builder.setSrc(new BuildTargetSourcePath(projectFilesystem, rule.getBuildTarget()));
     exportFile = (ExportFile) builder.build(ruleResolver);
@@ -241,7 +242,7 @@ public class ExportFileTest {
                 return null;
               }
             })
-        .setActionGraph(new ActionGraph(new MutableDirectedGraph<BuildRule>()))
+        .setActionGraph(new ActionGraph(ImmutableList.<BuildRule>of()))
         .setStepRunner(
             new StepRunner() {
 
@@ -256,7 +257,8 @@ public class ExportFileTest {
                   List<Step> steps,
                   Callable<T> interpretResults,
                   Optional<BuildTarget> buildTarget,
-                  ListeningExecutorService service) {
+                  ListeningExecutorService service,
+                  StepRunner.StepRunningCallback callback) {
                 return null;
               }
 
@@ -264,7 +266,8 @@ public class ExportFileTest {
               public void runStepsInParallelAndWait(
                   List<Step> steps,
                   Optional<BuildTarget> target,
-                  ListeningExecutorService service)
+                  ListeningExecutorService service,
+                  StepRunner.StepRunningCallback callback)
                   throws StepFailedException {
                 // Do nothing.
               }

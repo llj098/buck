@@ -35,22 +35,28 @@ import com.facebook.buck.event.BuckEventBus;
 import com.facebook.buck.event.BuckEventBusFactory;
 import com.facebook.buck.event.FakeBuckEventListener;
 import com.facebook.buck.io.ProjectFilesystem;
+import com.facebook.buck.java.FakeJavaPackageFinder;
 import com.facebook.buck.java.JavaPackageFinder;
 import com.facebook.buck.model.BuildId;
 import com.facebook.buck.model.BuildTarget;
 import com.facebook.buck.model.BuildTargetFactory;
 import com.facebook.buck.model.Pair;
+import com.facebook.buck.rules.keys.DefaultRuleKeyBuilderFactory;
+import com.facebook.buck.rules.keys.SupportsInputBasedRuleKey;
 import com.facebook.buck.step.AbstractExecutionStep;
 import com.facebook.buck.step.DefaultStepRunner;
 import com.facebook.buck.step.ExecutionContext;
 import com.facebook.buck.step.Step;
 import com.facebook.buck.step.StepFailedException;
 import com.facebook.buck.step.StepRunner;
+import com.facebook.buck.step.fs.WriteFileStep;
 import com.facebook.buck.testutil.FakeFileHashCache;
+import com.facebook.buck.testutil.FakeProjectFilesystem;
 import com.facebook.buck.testutil.RuleMap;
 import com.facebook.buck.testutil.integration.DebuggableTemporaryFolder;
 import com.facebook.buck.timing.DefaultClock;
 import com.facebook.buck.util.FileHashCache;
+import com.facebook.buck.util.NullFileHashCache;
 import com.facebook.buck.util.Verbosity;
 import com.facebook.buck.util.concurrent.MoreFutures;
 import com.google.common.base.Optional;
@@ -77,6 +83,7 @@ import java.io.BufferedOutputStream;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.Comparator;
@@ -98,6 +105,10 @@ public class CachingBuildEngineTest extends EasyMockSupport {
 
   private static final BuildTarget buildTarget =
       BuildTarget.builder("//src/com/facebook/orca", "orca").build();
+  private static final RuleKeyBuilderFactory NOOP_RULE_KEY_FACTORY =
+      new DefaultRuleKeyBuilderFactory(
+          new NullFileHashCache(),
+          new SourcePathResolver(new BuildRuleResolver()));
 
   @Rule
   public TemporaryFolder tmp = new DebuggableTemporaryFolder();
@@ -156,8 +167,8 @@ public class CachingBuildEngineTest extends EasyMockSupport {
 
     // The BuildContext that will be used by the rule's build() method.
     BuildContext context = createMock(BuildContext.class);
+    expect(context.getProjectFilesystem()).andReturn(new FakeProjectFilesystem());
     expect(context.getArtifactCache()).andReturn(artifactCache).times(2);
-    expect(context.getProjectRoot()).andReturn(createMock(Path.class));
 
     // Configure the OnDiskBuildInfo.
     OnDiskBuildInfo onDiskBuildInfo = new FakeOnDiskBuildInfo();
@@ -174,6 +185,7 @@ public class CachingBuildEngineTest extends EasyMockSupport {
         .andReturn(buildInfoRecorder);
     expect(
         buildInfoRecorder.fetchArtifactForBuildable(
+            anyObject(RuleKey.class),
             anyObject(File.class),
             eq(artifactCache)))
         .andReturn(CacheResult.miss());
@@ -188,7 +200,8 @@ public class CachingBuildEngineTest extends EasyMockSupport {
     CachingBuildEngine cachingBuildEngine =
         new CachingBuildEngine(
             MoreExecutors.newDirectExecutorService(),
-            CachingBuildEngine.BuildMode.SHALLOW);
+            CachingBuildEngine.BuildMode.SHALLOW,
+            NOOP_RULE_KEY_FACTORY);
 
     // Add a build step so we can verify that the steps are executed.
     Step buildStep = createMock(Step.class);
@@ -202,7 +215,10 @@ public class CachingBuildEngineTest extends EasyMockSupport {
     // These methods should be invoked after the rule is built locally.
     buildInfoRecorder.recordArtifact(Paths.get(pathToOutputFile));
     buildInfoRecorder.writeMetadataToDisk(/* clearExistingMetadata */ true);
-    buildInfoRecorder.performUploadToArtifactCache(artifactCache, buckEventBus);
+    buildInfoRecorder.performUploadToArtifactCache(
+        ImmutableSet.of(ruleToTest.getRuleKey()),
+        artifactCache,
+        buckEventBus);
 
     // Attempting to build the rule should force a rebuild due to a cache miss.
     replayAll();
@@ -264,6 +280,7 @@ public class CachingBuildEngineTest extends EasyMockSupport {
     BuildContext buildContext = createMock(BuildContext.class);
 
     BuildInfoRecorder buildInfoRecorder = createNiceMock(BuildInfoRecorder.class);
+    expect(buildContext.getProjectFilesystem()).andReturn(new FakeProjectFilesystem());
     expect(buildContext.createBuildInfoRecorder(
            eq(buildTarget),
            /* ruleKey */ anyObject(RuleKey.class),
@@ -293,20 +310,21 @@ public class CachingBuildEngineTest extends EasyMockSupport {
     buildInfoRecorder.writeMetadataToDisk(/* clearExistingMetadata */ false);
     expect(
         buildInfoRecorder.fetchArtifactForBuildable(
+            anyObject(RuleKey.class),
             anyObject(File.class),
             anyObject(ArtifactCache.class)))
         .andReturn(CacheResult.miss());
 
     expect(buildContext.createOnDiskBuildInfoFor(buildTarget)).andReturn(onDiskBuildInfo);
     expect(buildContext.getArtifactCache()).andStubReturn(new NoopArtifactCache());
-    expect(buildContext.getProjectRoot()).andReturn(createMock(Path.class));
     expect(buildContext.getEventBus()).andReturn(buckEventBus).anyTimes();
 
     replayAll();
     CachingBuildEngine cachingBuildEngine =
         new CachingBuildEngine(
             MoreExecutors.newDirectExecutorService(),
-            CachingBuildEngine.BuildMode.SHALLOW);
+            CachingBuildEngine.BuildMode.SHALLOW,
+            NOOP_RULE_KEY_FACTORY);
 
     ListenableFuture<BuildResult> buildResult = cachingBuildEngine.build(buildContext, buildRule);
     //assertTrue(
@@ -383,10 +401,10 @@ public class CachingBuildEngineTest extends EasyMockSupport {
     buckEventBus.register(listener);
 
     BuildContext buildContext = createMock(BuildContext.class);
-    expect(buildContext.getProjectRoot()).andReturn(createMock(Path.class));
     NoopArtifactCache artifactCache = new NoopArtifactCache();
     expect(buildContext.getArtifactCache()).andStubReturn(artifactCache);
     expect(buildContext.getStepRunner()).andStubReturn(null);
+    expect(buildContext.getProjectFilesystem()).andReturn(new FakeProjectFilesystem());
 
     BuildInfoRecorder buildInfoRecorder = createNiceMock(BuildInfoRecorder.class);
     expect(buildContext.createBuildInfoRecorder(
@@ -395,7 +413,11 @@ public class CachingBuildEngineTest extends EasyMockSupport {
            /* ruleKeyWithoutDeps */ anyObject(RuleKey.class)))
         .andReturn(buildInfoRecorder);
 
-    expect(buildInfoRecorder.fetchArtifactForBuildable(anyObject(File.class), eq(artifactCache)))
+    expect(
+        buildInfoRecorder.fetchArtifactForBuildable(
+            anyObject(RuleKey.class),
+            anyObject(File.class),
+            eq(artifactCache)))
         .andReturn(CacheResult.miss());
 
     expect(buildInfoRecorder.getOutputSizeAndHash(anyObject(HashFunction.class)))
@@ -407,12 +429,16 @@ public class CachingBuildEngineTest extends EasyMockSupport {
 
     // This metadata must be added to the buildInfoRecorder so that it is written as part of
     // writeMetadataToDisk().
-    buildInfoRecorder.addMetadata(CachingBuildEngine.ABI_KEY_FOR_DEPS_ON_DISK_METADATA,
+    buildInfoRecorder.addMetadata(
+        CachingBuildEngine.ABI_KEY_FOR_DEPS_ON_DISK_METADATA,
         TestAbstractCachingBuildRule.ABI_KEY_FOR_DEPS_HASH);
 
     // These methods should be invoked after the rule is built locally.
     buildInfoRecorder.writeMetadataToDisk(/* clearExistingMetadata */ true);
-    buildInfoRecorder.performUploadToArtifactCache(artifactCache, buckEventBus);
+    buildInfoRecorder.performUploadToArtifactCache(
+        ImmutableSet.of(buildRule.getRuleKey()),
+        artifactCache,
+        buckEventBus);
 
     expect(buildContext.createOnDiskBuildInfoFor(buildTarget)).andReturn(onDiskBuildInfo);
     expect(buildContext.getStepRunner()).andReturn(createStepRunner());
@@ -423,7 +449,8 @@ public class CachingBuildEngineTest extends EasyMockSupport {
     CachingBuildEngine cachingBuildEngine =
         new CachingBuildEngine(
             MoreExecutors.newDirectExecutorService(),
-            CachingBuildEngine.BuildMode.SHALLOW);
+            CachingBuildEngine.BuildMode.SHALLOW,
+            NOOP_RULE_KEY_FACTORY);
     ListenableFuture<BuildResult> buildResult = cachingBuildEngine.build(buildContext, buildRule);
     buckEventBus.post(CommandEvent.finished("build", ImmutableList.<String>of(), false, 0));
 
@@ -478,18 +505,23 @@ public class CachingBuildEngineTest extends EasyMockSupport {
     buckEventBus.register(listener);
 
     BuildContext buildContext = createMock(BuildContext.class);
-    expect(buildContext.getProjectRoot()).andReturn(createMock(Path.class));
+    expect(buildContext.getProjectFilesystem()).andReturn(new FakeProjectFilesystem());
     NoopArtifactCache artifactCache = new NoopArtifactCache();
     expect(buildContext.getArtifactCache()).andStubReturn(artifactCache);
     expect(buildContext.getStepRunner()).andStubReturn(null);
 
     BuildInfoRecorder buildInfoRecorder = createNiceMock(BuildInfoRecorder.class);
-    expect(buildContext.createBuildInfoRecorder(
+    expect(
+        buildContext.createBuildInfoRecorder(
             eq(buildTarget),
            /* ruleKey */ anyObject(RuleKey.class),
            /* ruleKeyWithoutDeps */ anyObject(RuleKey.class)))
         .andReturn(buildInfoRecorder);
-    expect(buildInfoRecorder.fetchArtifactForBuildable(anyObject(File.class), eq(artifactCache)))
+    expect(
+        buildInfoRecorder.fetchArtifactForBuildable(
+            anyObject(RuleKey.class),
+            anyObject(File.class),
+            eq(artifactCache)))
         .andReturn(CacheResult.miss());
     expect(buildInfoRecorder.getOutputSizeAndHash(anyObject(HashFunction.class)))
         .andReturn(new Pair<>(0L, HashCode.fromInt(0)))
@@ -506,7 +538,10 @@ public class CachingBuildEngineTest extends EasyMockSupport {
 
     // These methods should be invoked after the rule is built locally.
     buildInfoRecorder.writeMetadataToDisk(/* clearExistingMetadata */ true);
-    buildInfoRecorder.performUploadToArtifactCache(artifactCache, buckEventBus);
+    buildInfoRecorder.performUploadToArtifactCache(
+        ImmutableSet.of(buildRule.getRuleKey()),
+        artifactCache,
+        buckEventBus);
     expectLastCall().andAnswer(
         new IAnswer<Object>() {
           @Override
@@ -526,7 +561,8 @@ public class CachingBuildEngineTest extends EasyMockSupport {
     CachingBuildEngine cachingBuildEngine =
         new CachingBuildEngine(
             service,
-            CachingBuildEngine.BuildMode.SHALLOW);
+            CachingBuildEngine.BuildMode.SHALLOW,
+            NOOP_RULE_KEY_FACTORY);
     ListenableFuture<BuildResult> buildResult = cachingBuildEngine.build(buildContext, buildRule);
 
     BuildResult result = buildResult.get();
@@ -586,14 +622,6 @@ public class CachingBuildEngineTest extends EasyMockSupport {
 
     StepRunner stepRunner = createStepRunner();
 
-    // Mock out all of the disk I/O.
-    ProjectFilesystem projectFilesystem = createNiceMock(ProjectFilesystem.class);
-    expect(projectFilesystem
-        .readFileIfItExists(
-            Paths.get("buck-out/bin/src/com/facebook/orca/.orca/metadata/RULE_KEY")))
-        .andReturn(Optional.<String>absent());
-    expect(projectFilesystem.getRootPath()).andReturn(tmp.getRoot().toPath());
-
     // Simulate successfully fetching the output file from the ArtifactCache.
     ArtifactCache artifactCache = createMock(ArtifactCache.class);
     Map<String, String> desiredZipEntries = ImmutableMap.of(
@@ -603,13 +631,15 @@ public class CachingBuildEngineTest extends EasyMockSupport {
         artifactCache.fetch(
             eq(buildRule.getRuleKey()),
             isA(File.class)))
-        .andDelegateTo(new FakeArtifactCacheThatWritesAZipFile(desiredZipEntries));
+        .andDelegateTo(
+            new FakeArtifactCacheThatWritesAZipFile(desiredZipEntries));
 
+    FakeProjectFilesystem filesystem = new FakeProjectFilesystem();
     BuckEventBus buckEventBus = BuckEventBusFactory.newInstance();
     BuildContext buildContext = ImmutableBuildContext.builder()
         .setActionGraph(RuleMap.createGraphFromSingleRule(buildRule))
         .setStepRunner(stepRunner)
-        .setProjectFilesystem(projectFilesystem)
+        .setProjectFilesystem(filesystem)
         .setClock(new DefaultClock())
         .setBuildId(new BuildId())
         .setArtifactCache(artifactCache)
@@ -622,7 +652,8 @@ public class CachingBuildEngineTest extends EasyMockSupport {
     CachingBuildEngine cachingBuildEngine =
         new CachingBuildEngine(
             MoreExecutors.newDirectExecutorService(),
-            CachingBuildEngine.BuildMode.SHALLOW);
+            CachingBuildEngine.BuildMode.SHALLOW,
+            NOOP_RULE_KEY_FACTORY);
     ListenableFuture<BuildResult> buildResult = cachingBuildEngine.build(buildContext, buildRule);
     buckEventBus.post(CommandEvent.finished("build", ImmutableList.<String>of(), false, 0));
     verifyAll();
@@ -637,7 +668,7 @@ public class CachingBuildEngineTest extends EasyMockSupport {
         ((BuildableAbstractCachingBuildRule) buildRule).isInitializedFromDisk());
     assertTrue(
         "The entries in the zip should be extracted as a result of building the rule.",
-        new File(tmp.getRoot(), "buck-out/gen/src/com/facebook/orca/orca.jar").isFile());
+        filesystem.exists(Paths.get("buck-out/gen/src/com/facebook/orca/orca.jar")));
   }
 
   @Test
@@ -646,14 +677,6 @@ public class CachingBuildEngineTest extends EasyMockSupport {
 
     BuckEventBus buckEventBus = BuckEventBusFactory.newInstance();
     StepRunner stepRunner = createStepRunner(buckEventBus);
-
-    // Mock out all of the disk I/O.
-    ProjectFilesystem projectFilesystem = createNiceMock(ProjectFilesystem.class);
-    expect(projectFilesystem
-            .readFileIfItExists(
-                Paths.get("buck-out/bin/src/com/facebook/orca/.orca/metadata/RULE_KEY")))
-        .andReturn(Optional.<String>absent());
-    expect(projectFilesystem.getRootPath()).andReturn(tmp.getRoot().toPath());
 
     // Add a post build step so we can verify that it's steps are executed.
     Step buildStep = createMock(Step.class);
@@ -679,12 +702,14 @@ public class CachingBuildEngineTest extends EasyMockSupport {
         artifactCache.fetch(
             eq(buildRule.getRuleKey()),
             isA(File.class)))
-        .andDelegateTo(new FakeArtifactCacheThatWritesAZipFile(desiredZipEntries));
+        .andDelegateTo(
+            new FakeArtifactCacheThatWritesAZipFile(desiredZipEntries));
 
+    FakeProjectFilesystem filesystem = new FakeProjectFilesystem();
     BuildContext buildContext = ImmutableBuildContext.builder()
         .setActionGraph(RuleMap.createGraphFromSingleRule(buildRule))
         .setStepRunner(stepRunner)
-        .setProjectFilesystem(projectFilesystem)
+        .setProjectFilesystem(filesystem)
         .setClock(new DefaultClock())
         .setBuildId(new BuildId())
         .setArtifactCache(artifactCache)
@@ -697,7 +722,8 @@ public class CachingBuildEngineTest extends EasyMockSupport {
     CachingBuildEngine cachingBuildEngine =
         new CachingBuildEngine(
             MoreExecutors.newDirectExecutorService(),
-            CachingBuildEngine.BuildMode.SHALLOW);
+            CachingBuildEngine.BuildMode.SHALLOW,
+            NOOP_RULE_KEY_FACTORY);
     ListenableFuture<BuildResult> buildResult = cachingBuildEngine.build(buildContext, buildRule);
     buckEventBus.post(CommandEvent.finished("build", ImmutableList.<String>of(), false, 0));
     verifyAll();
@@ -708,7 +734,7 @@ public class CachingBuildEngineTest extends EasyMockSupport {
         ((BuildableAbstractCachingBuildRule) buildRule).isInitializedFromDisk());
     assertTrue(
         "The entries in the zip should be extracted as a result of building the rule.",
-        new File(tmp.getRoot(), "buck-out/gen/src/com/facebook/orca/orca.jar").isFile());
+        filesystem.exists(Paths.get("buck-out/gen/src/com/facebook/orca/orca.jar")));
   }
 
   @Test
@@ -752,7 +778,8 @@ public class CachingBuildEngineTest extends EasyMockSupport {
     CachingBuildEngine cachingBuildEngine =
         new CachingBuildEngine(
             MoreExecutors.newDirectExecutorService(),
-            CachingBuildEngine.BuildMode.SHALLOW);
+            CachingBuildEngine.BuildMode.SHALLOW,
+            NOOP_RULE_KEY_FACTORY);
 
     // Run the build.
     replayAll();
@@ -835,7 +862,8 @@ public class CachingBuildEngineTest extends EasyMockSupport {
     CachingBuildEngine cachingBuildEngine =
         new CachingBuildEngine(
             MoreExecutors.newDirectExecutorService(),
-            CachingBuildEngine.BuildMode.DEEP);
+            CachingBuildEngine.BuildMode.DEEP,
+            NOOP_RULE_KEY_FACTORY);
 
     // Run the build.
     replayAll();
@@ -949,7 +977,8 @@ public class CachingBuildEngineTest extends EasyMockSupport {
     CachingBuildEngine cachingBuildEngine =
         new CachingBuildEngine(
             MoreExecutors.newDirectExecutorService(),
-            CachingBuildEngine.BuildMode.SHALLOW);
+            CachingBuildEngine.BuildMode.SHALLOW,
+            NOOP_RULE_KEY_FACTORY);
 
     // Run the build.
     replayAll();
@@ -1071,13 +1100,254 @@ public class CachingBuildEngineTest extends EasyMockSupport {
     CachingBuildEngine cachingBuildEngine =
         new CachingBuildEngine(
             MoreExecutors.newDirectExecutorService(),
-            CachingBuildEngine.BuildMode.SHALLOW);
+            CachingBuildEngine.BuildMode.SHALLOW,
+            NOOP_RULE_KEY_FACTORY);
 
     // Run the build.
     replayAll();
     BuildResult result = cachingBuildEngine.build(context, ruleToTest).get();
     assertEquals(BuildRuleSuccessType.MATCHING_RULE_KEY, result.getSuccess());
     verifyAll();
+  }
+
+  @Test
+  public void testBuildRuleLocallyWithCacheError() throws Exception {
+    SourcePathResolver resolver = new SourcePathResolver(new BuildRuleResolver());
+    ProjectFilesystem filesystem = new FakeProjectFilesystem();
+
+    // Create an artifact cache that always errors out.
+    ArtifactCache cache =
+        new NoopArtifactCache() {
+          @Override
+          public CacheResult fetch(RuleKey ruleKey, File output) {
+            return CacheResult.error("cache", "error");
+          }
+        };
+
+    // Use the artifact cache when running a simple rule that will build locally.
+    BuildContext buildContext =
+        FakeBuildContext.newBuilder(filesystem)
+            .setArtifactCache(cache)
+            .setJavaPackageFinder(new FakeJavaPackageFinder())
+            .setActionGraph(new ActionGraph(ImmutableList.<BuildRule>of()))
+            .build();
+
+    BuildRule rule =
+        new NoopBuildRule(
+            BuildRuleParamsFactory.createTrivialBuildRuleParams(
+                BuildTargetFactory.newInstance("//:rule")),
+            resolver);
+    CachingBuildEngine cachingBuildEngine =
+        new CachingBuildEngine(
+            MoreExecutors.newDirectExecutorService(),
+            CachingBuildEngine.BuildMode.SHALLOW,
+            NOOP_RULE_KEY_FACTORY);
+
+    BuildResult result = cachingBuildEngine.build(buildContext, rule).get();
+    assertThat(result.getSuccess(), Matchers.equalTo(BuildRuleSuccessType.BUILT_LOCALLY));
+    assertThat(result.getCacheResult().getType(), Matchers.equalTo(CacheResult.Type.ERROR));
+  }
+
+  @Test
+  public void inputBasedRuleKeyAndArtifactAreWrittenForSupportedRules() throws Exception {
+    FakeProjectFilesystem filesystem = new FakeProjectFilesystem();
+    InMemoryArtifactCache cache = new InMemoryArtifactCache();
+    BuildContext buildContext =
+        FakeBuildContext.newBuilder(filesystem)
+            .setArtifactCache(cache)
+            .setJavaPackageFinder(new FakeJavaPackageFinder())
+            .setActionGraph(new ActionGraph(ImmutableList.<BuildRule>of()))
+            .build();
+
+    // Create a simple rule which just writes a file.
+    BuildTarget target = BuildTargetFactory.newInstance("//:rule");
+    BuildRuleParams params =
+        new FakeBuildRuleParamsBuilder(target)
+            .setProjectFilesystem(filesystem)
+            .build();
+    BuildRuleResolver resolver = new BuildRuleResolver();
+    SourcePathResolver pathResolver = new SourcePathResolver(resolver);
+    RuleKey inputRuleKey = new RuleKey("aaaa");
+    final Path output = Paths.get("output");
+    BuildRule rule =
+        new InputRuleKeyBuildRule(params, pathResolver) {
+          @Override
+          public ImmutableList<Step> getBuildSteps(
+              BuildContext context,
+              BuildableContext buildableContext) {
+            return ImmutableList.<Step>of(new WriteFileStep("", output));
+          }
+          @Override
+          public Path getPathToOutput() {
+            return output;
+          }
+        };
+
+    // Create the build engine.
+    CachingBuildEngine cachingBuildEngine =
+        new CachingBuildEngine(
+            MoreExecutors.newDirectExecutorService(),
+            CachingBuildEngine.BuildMode.SHALLOW,
+            new FixedRuleKeyBuilderFactory(ImmutableMap.of(rule.getBuildTarget(), inputRuleKey)));
+
+    // Run the build.
+    BuildResult result = cachingBuildEngine.build(buildContext, rule).get();
+    assertEquals(BuildRuleSuccessType.BUILT_LOCALLY, result.getSuccess());
+
+    // Verify that the artifact was indexed in the cache by the input rule key.
+    Optional<byte[]> artifact = cache.getArtifact(inputRuleKey);
+    assertTrue(artifact.isPresent());
+
+    // Verify the input rule key was written to disk.
+    OnDiskBuildInfo onDiskBuildInfo = buildContext.createOnDiskBuildInfoFor(target);
+    assertThat(
+        onDiskBuildInfo.getRuleKey(BuildInfo.METADATA_KEY_FOR_INPUT_BASED_RULE_KEY),
+        Matchers.equalTo(Optional.of(inputRuleKey)));
+  }
+
+  @Test
+  public void inputBasedRuleKeyMatchAvoidsBuildingLocally() throws Exception {
+    FakeProjectFilesystem filesystem = new FakeProjectFilesystem();
+    InMemoryArtifactCache cache = new InMemoryArtifactCache();
+    BuildContext buildContext =
+        FakeBuildContext.newBuilder(filesystem)
+            .setArtifactCache(cache)
+            .setJavaPackageFinder(new FakeJavaPackageFinder())
+            .setActionGraph(new ActionGraph(ImmutableList.<BuildRule>of()))
+            .build();
+
+    // Create a simple rule which just writes a file.
+    BuildTarget target = BuildTargetFactory.newInstance("//:rule");
+    BuildRuleParams params =
+        new FakeBuildRuleParamsBuilder(target)
+            .setProjectFilesystem(filesystem)
+            .build();
+    BuildRuleResolver resolver = new BuildRuleResolver();
+    SourcePathResolver pathResolver = new SourcePathResolver(resolver);
+    RuleKey inputRuleKey = new RuleKey("aaaa");
+    final Path output = Paths.get("output");
+    BuildRule rule =
+        new InputRuleKeyBuildRule(params, pathResolver) {
+          @Override
+          public ImmutableList<Step> getBuildSteps(
+              BuildContext context,
+              BuildableContext buildableContext) {
+            return ImmutableList.<Step>of(
+                new AbstractExecutionStep("false") {
+                  @Override
+                  public int execute(ExecutionContext context) {
+                    return 1;
+                  }
+                });
+          }
+          @Override
+          public Path getPathToOutput() {
+            return output;
+          }
+        };
+
+    // Prepopulate the input rule key on disk, so that we avoid a rebuild.
+    filesystem.writeContentsToPath(
+        inputRuleKey.toString(),
+        BuildInfo.getPathToMetadataDirectory(target)
+            .resolve(BuildInfo.METADATA_KEY_FOR_INPUT_BASED_RULE_KEY));
+
+    // Create the build engine.
+    CachingBuildEngine cachingBuildEngine =
+        new CachingBuildEngine(
+            MoreExecutors.newDirectExecutorService(),
+            CachingBuildEngine.BuildMode.SHALLOW,
+            new FixedRuleKeyBuilderFactory(ImmutableMap.of(rule.getBuildTarget(), inputRuleKey)));
+
+    // Run the build.
+    BuildResult result = cachingBuildEngine.build(buildContext, rule).get();
+    assertEquals(BuildRuleSuccessType.MATCHING_INPUT_BASED_RULE_KEY, result.getSuccess());
+
+    // Verify the actual rule key was updated on disk.
+    OnDiskBuildInfo onDiskBuildInfo = buildContext.createOnDiskBuildInfoFor(target);
+    assertThat(
+        onDiskBuildInfo.getRuleKey(BuildInfo.METADATA_KEY_FOR_RULE_KEY),
+        Matchers.equalTo(Optional.of(rule.getRuleKey())));
+  }
+
+  @Test
+  public void inputBasedRuleKeyCacheHitAvoidsBuildingLocally() throws Exception {
+    FakeProjectFilesystem filesystem = new FakeProjectFilesystem();
+    InMemoryArtifactCache cache = new InMemoryArtifactCache();
+    BuildContext buildContext =
+        FakeBuildContext.newBuilder(filesystem)
+            .setArtifactCache(cache)
+            .setJavaPackageFinder(new FakeJavaPackageFinder())
+            .setActionGraph(new ActionGraph(ImmutableList.<BuildRule>of()))
+            .build();
+
+    // Create a simple rule which just writes a file.
+    BuildTarget target = BuildTargetFactory.newInstance("//:rule");
+    RuleKey inputRuleKey = new RuleKey("aaaa");
+    BuildRuleParams params =
+        new FakeBuildRuleParamsBuilder(target)
+            .setProjectFilesystem(filesystem)
+            .build();
+    BuildRuleResolver resolver = new BuildRuleResolver();
+    SourcePathResolver pathResolver = new SourcePathResolver(resolver);
+    final Path output = Paths.get("output");
+    BuildRule rule =
+        new InputRuleKeyBuildRule(params, pathResolver) {
+          @Override
+          public ImmutableList<Step> getBuildSteps(
+              BuildContext context,
+              BuildableContext buildableContext) {
+            return ImmutableList.<Step>of(
+                new AbstractExecutionStep("false") {
+                  @Override
+                  public int execute(ExecutionContext context) {
+                    return 1;
+                  }
+                });
+          }
+          @Override
+          public Path getPathToOutput() {
+            return output;
+          }
+        };
+
+    // Prepopulate the cache with an artifact indexed by the input-based rule key.
+    File temp = File.createTempFile("artifact", ".zip");
+    writeEntriesToZip(
+        temp,
+        ImmutableMap.of(
+            BuildInfo.getPathToMetadataDirectory(target)
+                .resolve(BuildInfo.METADATA_KEY_FOR_RULE_KEY)
+                .toString(),
+            // Store a stale rule key, to verify it gets overwritten with the correct one.
+            new RuleKey("bbbb").toString(),
+            BuildInfo.getPathToMetadataDirectory(target)
+                .resolve(BuildInfo.METADATA_KEY_FOR_INPUT_BASED_RULE_KEY)
+                .toString(),
+            inputRuleKey.toString(),
+            output.toString(),
+            ""));
+    cache.putArtifact(inputRuleKey, Files.readAllBytes(temp.toPath()));
+
+    // Create the build engine.
+    CachingBuildEngine cachingBuildEngine =
+        new CachingBuildEngine(
+            MoreExecutors.newDirectExecutorService(),
+            CachingBuildEngine.BuildMode.SHALLOW,
+            new FixedRuleKeyBuilderFactory(ImmutableMap.of(rule.getBuildTarget(), inputRuleKey)));
+
+    // Run the build.
+    BuildResult result = cachingBuildEngine.build(buildContext, rule).get();
+    assertEquals(BuildRuleSuccessType.FETCHED_FROM_CACHE_INPUT_BASED, result.getSuccess());
+
+    // Verify the input-based and actual rule keys were updated on disk.
+    OnDiskBuildInfo onDiskBuildInfo = buildContext.createOnDiskBuildInfoFor(target);
+    assertThat(
+        onDiskBuildInfo.getRuleKey(BuildInfo.METADATA_KEY_FOR_RULE_KEY),
+        Matchers.equalTo(Optional.of(rule.getRuleKey())));
+    assertThat(
+        onDiskBuildInfo.getRuleKey(BuildInfo.METADATA_KEY_FOR_INPUT_BASED_RULE_KEY),
+        Matchers.equalTo(Optional.of(inputRuleKey)));
   }
 
 
@@ -1264,44 +1534,30 @@ public class CachingBuildEngineTest extends EasyMockSupport {
    * location of requested {@link File} and writes a zip file there with the entries specified to
    * its constructor.
    * <p>
-   * This makes it possible to react to a call to {@link ArtifactCache#store(RuleKey, File)} and
-   * ensure that there will be a zip file in place immediately after the captured method has been
-   * invoked.
+   * This makes it possible to react to a call to {@link ArtifactCache#store(ImmutableSet, File)}
+   * and ensure that there will be a zip file in place immediately after the captured method has
+   * been invoked.
    */
   private static class FakeArtifactCacheThatWritesAZipFile implements ArtifactCache {
 
     private final Map<String, String> desiredEntries;
 
     public FakeArtifactCacheThatWritesAZipFile(Map<String, String> desiredEntries) {
-      this.desiredEntries = ImmutableMap.copyOf(desiredEntries);
+      this.desiredEntries = desiredEntries;
     }
 
     @Override
     public CacheResult fetch(RuleKey ruleKey, File file) throws InterruptedException {
-      // This must have the side-effect of writing a zip file in the specified place.
       try {
-        writeEntries(file);
+        writeEntriesToZip(file, ImmutableMap.copyOf(desiredEntries));
       } catch (IOException e) {
         throw new RuntimeException(e);
       }
       return CacheResult.hit("dir");
     }
 
-    private void writeEntries(File file) throws IOException {
-      try (ZipOutputStream zip = new ZipOutputStream(
-          new BufferedOutputStream(
-              new FileOutputStream(file)))) {
-        for (Map.Entry<String, String> mapEntry : desiredEntries.entrySet()) {
-          ZipEntry entry = new ZipEntry(mapEntry.getKey());
-          zip.putNextEntry(entry);
-          zip.write(mapEntry.getValue().getBytes());
-          zip.closeEntry();
-        }
-      }
-    }
-
     @Override
-    public void store(RuleKey ruleKey, File output) throws InterruptedException {
+    public void store(ImmutableSet<RuleKey> ruleKeys, File output) {
       throw new UnsupportedOperationException();
     }
 
@@ -1342,6 +1598,59 @@ public class CachingBuildEngineTest extends EasyMockSupport {
       return runtimeDeps;
     }
 
+  }
+
+  private static class FixedRuleKeyBuilderFactory implements RuleKeyBuilderFactory {
+
+    private final ImmutableMap<BuildTarget, RuleKey> ruleKeys;
+
+    public FixedRuleKeyBuilderFactory(ImmutableMap<BuildTarget, RuleKey> ruleKeys) {
+      this.ruleKeys = ruleKeys;
+    }
+
+    @Override
+    public RuleKey.Builder newInstance(final BuildRule buildRule) {
+      SourcePathResolver resolver = new SourcePathResolver(new BuildRuleResolver());
+      FileHashCache hashCache = new NullFileHashCache();
+      AppendableRuleKeyCache ruleKeyCache = new AppendableRuleKeyCache(resolver, hashCache);
+      return new RuleKey.Builder(resolver, hashCache, ruleKeyCache) {
+
+        @Override
+        public RuleKey.Builder setReflectively(String key, @Nullable Object val) {
+          return this;
+        }
+
+        @Override
+        public RuleKey build() {
+          return ruleKeys.get(buildRule.getBuildTarget());
+        }
+
+      };
+    }
+  }
+
+  private abstract static class InputRuleKeyBuildRule
+      extends AbstractBuildRule
+      implements SupportsInputBasedRuleKey {
+    public InputRuleKeyBuildRule(
+        BuildRuleParams buildRuleParams,
+        SourcePathResolver resolver) {
+      super(buildRuleParams, resolver);
+    }
+  }
+
+  private static void writeEntriesToZip(File file, ImmutableMap<String, String> entries)
+      throws IOException {
+    try (ZipOutputStream zip = new ZipOutputStream(
+        new BufferedOutputStream(
+            new FileOutputStream(file)))) {
+      for (Map.Entry<String, String> mapEntry : entries.entrySet()) {
+        ZipEntry entry = new ZipEntry(mapEntry.getKey());
+        zip.putNextEntry(entry);
+        zip.write(mapEntry.getValue().getBytes());
+        zip.closeEntry();
+      }
+    }
   }
 
 }

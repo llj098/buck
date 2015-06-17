@@ -134,6 +134,7 @@ public class ExopackageInstallerTest {
   @Test
   public void testParseOnlyPackageInfo() {
     String lines =
+        "1\r\n" +
         "  Package [com.facebook.katana] (4229ce68):\r\n" +
             "    userId=10145 gids=[1028, 1015, 3003]\r\n" +
             "    pkg=Package{42690b80 com.facebook.katana}\r\n" +

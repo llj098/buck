@@ -54,8 +54,6 @@ import com.google.common.collect.Iterables;
 import com.google.common.io.Files;
 
 import java.nio.file.Path;
-import java.util.Collection;
-import java.util.Collections;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -525,20 +523,14 @@ public class CxxDescriptionEnhancer {
         lexYaccCxxSourcesBuilder.build());
   }
 
-  public static CxxPreprocessorInput combineCxxPreprocessorInput(
+  public static ImmutableList<CxxPreprocessorInput> collectCxxPreprocessorInput(
       BuildRuleParams params,
       CxxPlatform cxxPlatform,
       ImmutableMultimap<CxxSource.Type, String> preprocessorFlags,
       ImmutableList<SourcePath> prefixHeaders,
       ImmutableList<SymlinkTree> headerSymlinkTrees,
-      ImmutableList<Path> frameworkSearchPaths) {
-
-    // Write the compile rules for all C/C++ sources in this rule.
-    Collection<CxxPreprocessorInput> cxxPreprocessorInputFromDeps =
-        CxxPreprocessables.getTransitiveCxxPreprocessorInput(
-            cxxPlatform,
-            FluentIterable.from(params.getDeps())
-                .filter(Predicates.instanceOf(CxxPreprocessorDep.class)));
+      ImmutableList<Path> frameworkSearchPaths,
+      Iterable<CxxPreprocessorInput> cxxPreprocessorInputFromDeps) {
 
     // Add the private includes of any rules which list this rule as a test.
     BuildTarget targetWithoutFlavor = BuildTarget.of(
@@ -591,15 +583,11 @@ public class CxxDescriptionEnhancer {
             .addAllFrameworkRoots(frameworkSearchPaths)
             .build();
 
-    try {
-      return CxxPreprocessorInput.concat(
-          Iterables.concat(
-              Collections.singleton(localPreprocessorInput),
-              cxxPreprocessorInputFromDeps,
-              cxxPreprocessorInputFromTestedRules));
-    } catch (CxxPreprocessorInput.ConflictingHeadersException e) {
-      throw e.getHumanReadableExceptionForBuildTarget(params.getBuildTarget());
-    }
+    return ImmutableList.<CxxPreprocessorInput>builder()
+        .add(localPreprocessorInput)
+        .addAll(cxxPreprocessorInputFromDeps)
+        .addAll(cxxPreprocessorInputFromTestedRules)
+        .build();
   }
 
   public static BuildTarget createStaticLibraryBuildTarget(
@@ -710,17 +698,22 @@ public class CxxDescriptionEnhancer {
         yaccSrcs,
         headers,
         HeaderVisibility.PRIVATE);
-    CxxPreprocessorInput cxxPreprocessorInput = combineCxxPreprocessorInput(
-        params,
-        cxxPlatform,
-        CxxFlags.getLanguageFlags(
-            args.preprocessorFlags,
-            args.platformPreprocessorFlags,
-            args.langPreprocessorFlags,
-            cxxPlatform.getFlavor()),
-        args.prefixHeaders.get(),
-        ImmutableList.of(headerSymlinkTree),
-        args.frameworkSearchPaths.get());
+    ImmutableList<CxxPreprocessorInput> cxxPreprocessorInput =
+        collectCxxPreprocessorInput(
+            params,
+            cxxPlatform,
+            CxxFlags.getLanguageFlags(
+                args.preprocessorFlags,
+                args.platformPreprocessorFlags,
+                args.langPreprocessorFlags,
+                cxxPlatform.getFlavor()),
+            args.prefixHeaders.get(),
+            ImmutableList.of(headerSymlinkTree),
+            args.frameworkSearchPaths.get(),
+            CxxPreprocessables.getTransitiveCxxPreprocessorInput(
+                cxxPlatform,
+                FluentIterable.from(params.getDeps())
+                    .filter(Predicates.instanceOf(CxxPreprocessorDep.class))));
 
     // The complete list of input sources.
     ImmutableMap<String, CxxSource> sources =

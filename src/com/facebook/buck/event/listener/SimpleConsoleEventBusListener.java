@@ -15,8 +15,8 @@
  */
 package com.facebook.buck.event.listener;
 
-import com.facebook.buck.cli.InstallEvent;
 import com.facebook.buck.event.ConsoleEvent;
+import com.facebook.buck.event.InstallEvent;
 import com.facebook.buck.parser.ParseEvent;
 import com.facebook.buck.rules.BuildEvent;
 import com.facebook.buck.rules.BuildRuleEvent;
@@ -104,7 +104,8 @@ public class SimpleConsoleEventBusListener extends AbstractConsoleEventBusListen
         event.isRunAllTests(),
         event.getTestSelectorList(),
         event.shouldExplainTestSelectorList(),
-        event.getTargetNames());
+        event.getTargetNames(),
+        TestResultFormatter.FormatMode.BEFORE_TEST_RUN);
     printLines(lines);
   }
 

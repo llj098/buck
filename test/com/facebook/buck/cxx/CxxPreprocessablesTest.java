@@ -73,6 +73,23 @@ public class CxxPreprocessablesTest {
       return input;
     }
 
+    @Override
+    public ImmutableMap<BuildTarget, CxxPreprocessorInput> getTransitiveCxxPreprocessorInput(
+        CxxPlatform cxxPlatform,
+        HeaderVisibility headerVisibility) {
+      ImmutableMap.Builder<BuildTarget, CxxPreprocessorInput> builder = ImmutableMap.builder();
+      builder.put(getBuildTarget(), getCxxPreprocessorInput(cxxPlatform, headerVisibility));
+      for (BuildRule dep : getDeps()) {
+        if (dep instanceof CxxPreprocessorDep) {
+          builder.putAll(
+              ((CxxPreprocessorDep) dep).getTransitiveCxxPreprocessorInput(
+                  cxxPlatform,
+                  headerVisibility));
+          }
+        }
+      return builder.build();
+    }
+
   }
 
   private static FakeCxxPreprocessorDep createFakeCxxPreprocessorDep(
@@ -167,7 +184,7 @@ public class CxxPreprocessablesTest {
 
     // Verify that getTransitiveCxxPreprocessorInput gets all CxxPreprocessorInput objects
     // from the relevant rules above.
-    ImmutableList<CxxPreprocessorInput> expected = ImmutableList.of(input1, input2, nothing);
+    ImmutableList<CxxPreprocessorInput> expected = ImmutableList.of(nothing, input1, input2);
     ImmutableList<CxxPreprocessorInput> actual = ImmutableList.copyOf(
         CxxPreprocessables.getTransitiveCxxPreprocessorInput(
             cxxPlatform,
@@ -282,7 +299,7 @@ public class CxxPreprocessablesTest {
         .build();
     BuildRule top = createFakeCxxPreprocessorDep("//:top", pathResolver, topInput, bottom);
 
-    exception.expect(CxxPreprocessorInput.ConflictingHeadersException.class);
+    exception.expect(CxxHeaders.ConflictingHeadersException.class);
     exception.expectMessage(String.format(
             "'%s' maps to both [%s, %s].",
             Paths.get("prefix/file.h"),

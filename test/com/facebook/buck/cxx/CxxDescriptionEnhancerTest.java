@@ -42,6 +42,8 @@ import com.facebook.buck.rules.TestSourcePath;
 import com.facebook.buck.shell.Genrule;
 import com.facebook.buck.shell.GenruleBuilder;
 import com.facebook.buck.testutil.FakeProjectFilesystem;
+import com.google.common.base.Predicates;
+import com.google.common.collect.FluentIterable;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableMultimap;
@@ -148,7 +150,7 @@ public class CxxDescriptionEnhancerTest {
   }
 
   @Test
-  public void libraryTestIncludesPrivateHeadersOfLibraryUnderTest() {
+  public void libraryTestIncludesPrivateHeadersOfLibraryUnderTest() throws Exception {
     SourcePathResolver pathResolver = new SourcePathResolver(new BuildRuleResolver());
 
     BuildTarget libTarget = BuildTargetFactory.newInstance("//:lib");
@@ -177,24 +179,29 @@ public class CxxDescriptionEnhancerTest {
         .setDeps(ImmutableSortedSet.<BuildRule>of(libRule))
         .build();
 
-    CxxPreprocessorInput combinedInput = CxxDescriptionEnhancer.combineCxxPreprocessorInput(
-        testParams,
-        CxxPlatformUtils.DEFAULT_PLATFORM,
-        ImmutableMultimap.<CxxSource.Type, String>of(),
-        ImmutableList.<SourcePath>of(),
-        ImmutableList.<SymlinkTree>of(),
-        ImmutableList.<Path>of());
+    ImmutableList<CxxPreprocessorInput> combinedInput =
+        CxxDescriptionEnhancer.collectCxxPreprocessorInput(
+            testParams,
+            CxxPlatformUtils.DEFAULT_PLATFORM,
+            ImmutableMultimap.<CxxSource.Type, String>of(),
+            ImmutableList.<SourcePath>of(),
+            ImmutableList.<SymlinkTree>of(),
+            ImmutableList.<Path>of(),
+            CxxPreprocessables.getTransitiveCxxPreprocessorInput(
+                CxxPlatformUtils.DEFAULT_PLATFORM,
+                FluentIterable.from(testParams.getDeps())
+                    .filter(Predicates.instanceOf(CxxPreprocessorDep.class))));
 
     assertThat(
         "Test of library should include both public and private headers",
-        combinedInput.getIncludeRoots(),
+        CxxPreprocessorInput.concat(combinedInput).getIncludeRoots(),
         hasItems(
             Paths.get("symlink/tree/lib"),
             Paths.get("private/symlink/tree/lib")));
   }
 
   @Test
-  public void nonTestLibraryDepDoesNotIncludePrivateHeadersOfLibrary() {
+  public void nonTestLibraryDepDoesNotIncludePrivateHeadersOfLibrary() throws Exception {
     SourcePathResolver pathResolver = new SourcePathResolver(new BuildRuleResolver());
 
     BuildTarget libTarget = BuildTargetFactory.newInstance("//:lib");
@@ -223,17 +230,22 @@ public class CxxDescriptionEnhancerTest {
         .setDeps(ImmutableSortedSet.<BuildRule>of(libRule))
         .build();
 
-    CxxPreprocessorInput otherInput = CxxDescriptionEnhancer.combineCxxPreprocessorInput(
-        otherLibDepParams,
-        CxxPlatformUtils.DEFAULT_PLATFORM,
-        ImmutableMultimap.<CxxSource.Type, String>of(),
-        ImmutableList.<SourcePath>of(),
-        ImmutableList.<SymlinkTree>of(),
-        ImmutableList.<Path>of());
+    ImmutableList<CxxPreprocessorInput> otherInput =
+        CxxDescriptionEnhancer.collectCxxPreprocessorInput(
+            otherLibDepParams,
+            CxxPlatformUtils.DEFAULT_PLATFORM,
+            ImmutableMultimap.<CxxSource.Type, String>of(),
+            ImmutableList.<SourcePath>of(),
+            ImmutableList.<SymlinkTree>of(),
+            ImmutableList.<Path>of(),
+            CxxPreprocessables.getTransitiveCxxPreprocessorInput(
+                CxxPlatformUtils.DEFAULT_PLATFORM,
+                FluentIterable.from(otherLibDepParams.getDeps())
+                    .filter(Predicates.instanceOf(CxxPreprocessorDep.class))));
 
     assertThat(
         "Non-test rule with library dep should include public and not private headers",
-        otherInput.getIncludeRoots(),
+        CxxPreprocessorInput.concat(otherInput).getIncludeRoots(),
         allOf(
             hasItem(Paths.get("symlink/tree/lib")),
             not(hasItem(Paths.get("private/symlink/tree/lib")))));

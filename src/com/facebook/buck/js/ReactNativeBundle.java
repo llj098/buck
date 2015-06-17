@@ -16,9 +16,8 @@
 
 package com.facebook.buck.js;
 
-import com.facebook.buck.android.AndroidPackageable;
-import com.facebook.buck.android.AndroidPackageableCollector;
 import com.facebook.buck.io.ProjectFilesystem;
+import com.facebook.buck.model.BuildTarget;
 import com.facebook.buck.model.BuildTargets;
 import com.facebook.buck.rules.AbiRule;
 import com.facebook.buck.rules.AbstractBuildRule;
@@ -26,7 +25,6 @@ import com.facebook.buck.rules.AddToRuleKey;
 import com.facebook.buck.rules.BuildContext;
 import com.facebook.buck.rules.BuildRuleParams;
 import com.facebook.buck.rules.BuildableContext;
-import com.facebook.buck.rules.PathSourcePath;
 import com.facebook.buck.rules.Sha1HashCode;
 import com.facebook.buck.rules.SourcePath;
 import com.facebook.buck.rules.SourcePathResolver;
@@ -34,13 +32,15 @@ import com.facebook.buck.shell.ShellStep;
 import com.facebook.buck.step.ExecutionContext;
 import com.facebook.buck.step.Step;
 import com.facebook.buck.step.fs.MakeCleanDirectoryStep;
-import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
 
 import java.nio.file.Path;
 
-public class ReactNativeLibrary extends AbstractBuildRule
-    implements AbiRule, AndroidPackageable {
+/**
+ * Responsible for running the React Native JS packager in order to generate a single {@code .js}
+ * bundle along with resources referenced by the javascript code.
+ */
+public class ReactNativeBundle extends AbstractBuildRule implements AbiRule {
 
   @AddToRuleKey
   private final SourcePath entryPath;
@@ -55,9 +55,10 @@ public class ReactNativeLibrary extends AbstractBuildRule
   private final ReactNativePlatform platform;
 
   private final ReactNativeDeps depsFinder;
-  private final Path output;
+  private final Path jsOutput;
+  private final Path resource;
 
-  protected ReactNativeLibrary(
+  protected ReactNativeBundle(
       BuildRuleParams ruleParams,
       SourcePathResolver resolver,
       SourcePath entryPath,
@@ -72,7 +73,9 @@ public class ReactNativeLibrary extends AbstractBuildRule
     this.jsPackager = jsPackager;
     this.platform = platform;
     this.depsFinder = depsFinder;
-    this.output = BuildTargets.getGenPath(ruleParams.getBuildTarget(), "__%s/").resolve(bundleName);
+    BuildTarget buildTarget = ruleParams.getBuildTarget();
+    this.jsOutput = BuildTargets.getGenPath(buildTarget, "__%s_js__/").resolve(bundleName);
+    this.resource = BuildTargets.getGenPath(buildTarget, "__%s_res__/").resolve("res");
   }
 
   @Override
@@ -80,53 +83,49 @@ public class ReactNativeLibrary extends AbstractBuildRule
       BuildContext context,
       BuildableContext buildableContext) {
     ImmutableList.Builder<Step> steps = ImmutableList.builder();
-    steps.add(new MakeCleanDirectoryStep(output.getParent()));
+    steps.add(new MakeCleanDirectoryStep(jsOutput.getParent()));
+    steps.add(new MakeCleanDirectoryStep(resource));
 
-    steps.add(new ShellStep() {
-      @Override
-      public String getShortName() {
-        return "bundle_react_native";
-      }
+    steps.add(
+        new ShellStep() {
+          @Override
+          public String getShortName() {
+            return "bundle_react_native";
+          }
 
-      @Override
-      protected ImmutableList<String> getShellCommandInternal(ExecutionContext context) {
-        ProjectFilesystem filesystem = context.getProjectFilesystem();
-        return ImmutableList.of(
-            getResolver().getPath(jsPackager).toString(),
-            "bundle",
-            "--entry-file", filesystem.resolve(getResolver().getPath(entryPath)).toString(),
-            "--platform", platform.toString(),
-            "--dev", isDevMode ? "true" : "false",
-            "--bundle-output", filesystem.resolve(output).toString());
-      }
-    });
-    buildableContext.recordArtifact(output);
+          @Override
+          protected ImmutableList<String> getShellCommandInternal(ExecutionContext context) {
+            ProjectFilesystem filesystem = context.getProjectFilesystem();
+            return ImmutableList.of(
+                getResolver().getPath(jsPackager).toString(),
+                "bundle",
+                "--entry-file", filesystem.resolve(getResolver().getPath(entryPath)).toString(),
+                "--platform", platform.toString(),
+                "--dev", isDevMode ? "true" : "false",
+                "--bundle-output", filesystem.resolve(jsOutput).toString(),
+                "--assets-dest", filesystem.resolve(resource).toString());
+          }
+        });
+    buildableContext.recordArtifact(jsOutput);
+    buildableContext.recordArtifact(resource);
     return steps.build();
+  }
+
+  public Path getPathToJSBundleDir() {
+    return jsOutput.getParent();
+  }
+
+  public Path getPathToResources() {
+    return resource;
   }
 
   @Override
   public Path getPathToOutput() {
-    return output;
+    return jsOutput;
   }
 
   @Override
   public Sha1HashCode getAbiKeyForDeps() {
     return depsFinder.getInputsHash();
-  }
-
-  @Override
-  public Iterable<AndroidPackageable> getRequiredPackageables() {
-    // TODO(natthu): Consider defining two build rules, and make only the Android build rule
-    // implement AndroidPackageable.
-    Preconditions.checkState(platform == ReactNativePlatform.ANDROID);
-    return AndroidPackageableCollector.getPackageableRules(getDeps());
-  }
-
-  @Override
-  public void addToCollector(AndroidPackageableCollector collector) {
-    Preconditions.checkState(platform == ReactNativePlatform.ANDROID);
-    collector.addAssetsDirectory(
-        getBuildTarget(),
-        new PathSourcePath(getProjectFilesystem(), output.getParent()));
   }
 }

@@ -17,13 +17,13 @@
 package com.facebook.buck.event.listener;
 
 import com.facebook.buck.cli.CommandEvent;
-import com.facebook.buck.cli.InstallEvent;
-import com.facebook.buck.cli.StartActivityEvent;
-import com.facebook.buck.cli.UninstallEvent;
 import com.facebook.buck.event.BuckEvent;
 import com.facebook.buck.event.BuckEventListener;
 import com.facebook.buck.event.ChromeTraceEvent;
+import com.facebook.buck.event.InstallEvent;
+import com.facebook.buck.event.StartActivityEvent;
 import com.facebook.buck.event.TraceEvent;
+import com.facebook.buck.event.UninstallEvent;
 import com.facebook.buck.io.PathListing;
 import com.facebook.buck.io.ProjectFilesystem;
 import com.facebook.buck.log.Logger;
@@ -393,7 +393,7 @@ public class ChromeTraceBuildListener implements BuckEventListener {
         started.getCategory(),
         ChromeTraceEvent.Phase.BEGIN,
         ImmutableMap.of(
-            "rule_key", started.getRuleKey().toString()),
+            "rule_key", Joiner.on(", ").join(started.getRuleKeys())),
         started);
   }
 
@@ -401,7 +401,7 @@ public class ChromeTraceBuildListener implements BuckEventListener {
   public void artifactFetchFinished(ArtifactCacheEvent.Finished finished) {
     ImmutableMap.Builder<String, String> argumentsBuilder = ImmutableMap.<String, String>builder()
         .put("success", Boolean.toString(finished.isSuccess()))
-        .put("rule_key", finished.getRuleKey().toString());
+        .put("rule_key", Joiner.on(", ").join(finished.getRuleKeys()));
     Optionals.putIfPresent(finished.getCacheResult().transform(Functions.toStringFunction()),
         "cache_result",
         argumentsBuilder);

@@ -113,6 +113,15 @@ public class CxxBinaryDescriptionTest {
       }
 
       @Override
+      public ImmutableMap<BuildTarget, CxxPreprocessorInput> getTransitiveCxxPreprocessorInput(
+          CxxPlatform cxxPlatform,
+          HeaderVisibility headerVisibility) {
+        return ImmutableMap.of(
+            getBuildTarget(),
+            getCxxPreprocessorInput(cxxPlatform, headerVisibility));
+      }
+
+      @Override
       public NativeLinkableInput getNativeLinkableInput(
           CxxPlatform cxxPlatform,
           Linker.LinkableDepType type) {
@@ -181,7 +190,7 @@ public class CxxBinaryDescriptionTest {
             resolver,
             pathResolver,
             cxxPlatform,
-            CxxPreprocessorInput.EMPTY,
+            ImmutableList.<CxxPreprocessorInput>of(),
             ImmutableList.<String>of());
 
     // Check that link rule has the expected deps: the object files for our sources and the

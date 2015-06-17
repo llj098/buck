@@ -34,9 +34,12 @@ import com.facebook.buck.rules.BuildDependencies;
 import com.facebook.buck.rules.BuildEngine;
 import com.facebook.buck.rules.BuildEvent;
 import com.facebook.buck.rules.BuildRule;
+import com.facebook.buck.rules.BuildRuleResolver;
 import com.facebook.buck.rules.CachingBuildEngine;
+import com.facebook.buck.rules.SourcePathResolver;
 import com.facebook.buck.rules.TargetGraph;
 import com.facebook.buck.rules.TargetGraphToActionGraph;
+import com.facebook.buck.rules.keys.InputBasedRuleKeyBuilderFactory;
 import com.facebook.buck.step.TargetDevice;
 import com.facebook.buck.timing.Clock;
 import com.facebook.buck.util.Console;
@@ -297,6 +300,7 @@ public class BuildCommand extends AbstractCommand {
 
     // Parse the build files to create a ActionGraph.
     ActionGraph actionGraph;
+    BuildRuleResolver resolver;
     try {
       Pair<ImmutableSet<BuildTarget>, TargetGraph> result = params.getParser()
           .buildTargetGraphForTargetNodeSpecs(
@@ -310,10 +314,13 @@ public class BuildCommand extends AbstractCommand {
               params.getEnvironment(),
               getEnableProfiling());
       buildTargets = result.getFirst();
-      actionGraph = new TargetGraphToActionGraph(
-          params.getBuckEventBus(),
-          new BuildTargetNodeToBuildRuleTransformer(),
-          params.getFileHashCache()).apply(result.getSecond());
+      TargetGraphToActionGraph targetGraphToActionGraph =
+          new TargetGraphToActionGraph(
+              params.getBuckEventBus(),
+              new BuildTargetNodeToBuildRuleTransformer(),
+              params.getFileHashCache());
+      actionGraph = targetGraphToActionGraph.apply(result.getSecond());
+      resolver = targetGraphToActionGraph.getRuleResolver();
     } catch (BuildTargetException | BuildFileParseException e) {
       params.getConsole().printBuildFailureWithoutStacktrace(e);
       return 1;
@@ -324,7 +331,7 @@ public class BuildCommand extends AbstractCommand {
       BuildTargetParser parser = new BuildTargetParser();
       BuildTarget explicitTarget =
           parser.parse(justBuildTarget, BuildTargetPatternParser.fullyQualified(parser));
-      ImmutableSet<BuildRule> actionGraphRules = Preconditions.checkNotNull(actionGraph.getNodes());
+      Iterable<BuildRule> actionGraphRules = Preconditions.checkNotNull(actionGraph.getNodes());
       ImmutableSet<BuildTarget> actionGraphTargets =
           ImmutableSet.copyOf(Iterables.transform(actionGraphRules, HasBuildTarget.TO_TARGET));
       if (!actionGraphTargets.contains(explicitTarget)) {
@@ -345,7 +352,10 @@ public class BuildCommand extends AbstractCommand {
              params.getAndroidPlatformTargetSupplier(),
              new CachingBuildEngine(
                  pool.getExecutor(),
-                 getBuildEngineMode().or(params.getBuckConfig().getBuildEngineMode())),
+                 getBuildEngineMode().or(params.getBuckConfig().getBuildEngineMode()),
+                 new InputBasedRuleKeyBuilderFactory(
+                     params.getFileHashCache(),
+                     new SourcePathResolver(resolver))),
              artifactCache,
              params.getConsole(),
              params.getBuckEventBus(),

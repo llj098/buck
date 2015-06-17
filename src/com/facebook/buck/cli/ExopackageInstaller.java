@@ -20,9 +20,11 @@ import com.android.ddmlib.AdbCommandRejectedException;
 import com.android.ddmlib.CollectingOutputReceiver;
 import com.android.ddmlib.IDevice;
 import com.android.ddmlib.InstallException;
+import com.facebook.buck.android.AdbHelper;
 import com.facebook.buck.android.agent.util.AgentUtil;
 import com.facebook.buck.event.BuckEventBus;
 import com.facebook.buck.event.ConsoleEvent;
+import com.facebook.buck.event.InstallEvent;
 import com.facebook.buck.event.TraceEventLogger;
 import com.facebook.buck.io.ProjectFilesystem;
 import com.facebook.buck.log.Logger;
@@ -388,7 +390,7 @@ public class ExopackageInstaller {
         // output in that case.
         String lines = AdbHelper.executeCommandWithErrorChecking(
             device,
-            String.format("pm path %s && dumpsys package %s", packageName, packageName));
+            String.format("pm path %s; dumpsys package %s", packageName, packageName));
 
         return parsePathAndPackageInfo(packageName, lines);
       }

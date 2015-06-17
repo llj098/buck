@@ -92,7 +92,9 @@ public class CxxCompilationDatabaseTest {
             operation,
             Optional.<Tool>of(new HashedFileTool(Paths.get("preprocessor"))),
             Optional.of(ImmutableList.<String>of()),
+            Optional.of(ImmutableList.<String>of()),
             Optional.<Tool>absent(),
+            Optional.<ImmutableList<String>>absent(),
             Optional.<ImmutableList<String>>absent(),
             Paths.get("test.o"),
             new TestSourcePath("test.cpp"),
@@ -102,7 +104,7 @@ public class CxxCompilationDatabaseTest {
                 Paths.get("test")),
             ImmutableList.<Path>of(),
             ImmutableList.<Path>of(),
-            CxxHeaders.builder().build(),
+            ImmutableList.<CxxHeaders>of(),
             CxxPlatforms.DEFAULT_DEBUG_PATH_SANITIZER);
         rules.add(preprocessRule);
         compileBuildRuleParams = new FakeBuildRuleParamsBuilder(compileTarget)
@@ -127,7 +129,9 @@ public class CxxCompilationDatabaseTest {
             operation,
             Optional.<Tool>of(new HashedFileTool(Paths.get("preprocessor"))),
             Optional.of(ImmutableList.<String>of()),
+            Optional.of(ImmutableList.<String>of()),
             Optional.<Tool>of(new HashedFileTool(Paths.get("compiler"))),
+            Optional.of(ImmutableList.<String>of()),
             Optional.of(ImmutableList.<String>of()),
             Paths.get("test.o"),
             new TestSourcePath("test.cpp"),
@@ -137,7 +141,7 @@ public class CxxCompilationDatabaseTest {
                 Paths.get("test")),
             ImmutableList.<Path>of(),
             ImmutableList.<Path>of(),
-            CxxHeaders.builder().build(),
+            ImmutableList.<CxxHeaders>of(),
             CxxPlatforms.DEFAULT_DEBUG_PATH_SANITIZER));
 
     CxxCompilationDatabase compilationDatabase = CxxCompilationDatabase.createCompilationDatabase(
@@ -206,13 +210,13 @@ public class CxxCompilationDatabaseTest {
     runCombinedTest(CxxPreprocessMode.PIPED,
         ImmutableList.of(
             "compiler",
-            "-x",
-            "c++",
-            "-c",
             "-I",
             "foo/bar",
             "-I",
             "test",
+            "-x",
+            "c++",
+            "-c",
             "-o",
             "test.o",
             "test.cpp"));
@@ -247,7 +251,9 @@ public class CxxCompilationDatabaseTest {
         CxxPreprocessAndCompileStep.Operation.PREPROCESS,
         Optional.<Tool>of(new HashedFileTool(Paths.get("compiler"))),
         Optional.of(ImmutableList.<String>of()),
+        Optional.of(ImmutableList.<String>of()),
         Optional.<Tool>absent(),
+        Optional.<ImmutableList<String>>absent(),
         Optional.<ImmutableList<String>>absent(),
         Paths.get("test.ii"),
         new TestSourcePath("test.cpp"),
@@ -257,7 +263,7 @@ public class CxxCompilationDatabaseTest {
             Paths.get("test")),
         ImmutableList.<Path>of(),
         ImmutableList.<Path>of(),
-        CxxHeaders.builder().build(),
+        ImmutableList.<CxxHeaders>of(),
         CxxPlatforms.DEFAULT_DEBUG_PATH_SANITIZER);
 
     BuildTarget compileTarget = BuildTarget
@@ -274,7 +280,9 @@ public class CxxCompilationDatabaseTest {
         CxxPreprocessAndCompileStep.Operation.COMPILE,
         Optional.<Tool>absent(),
         Optional.<ImmutableList<String>>absent(),
+        Optional.<ImmutableList<String>>absent(),
         Optional.<Tool>of(new HashedFileTool(Paths.get("compiler"))),
+        Optional.of(ImmutableList.<String>of()),
         Optional.of(ImmutableList.<String>of()),
         Paths.get("test.o"),
         new TestSourcePath("test.ii"),
@@ -282,7 +290,7 @@ public class CxxCompilationDatabaseTest {
         ImmutableList.<Path>of(),
         ImmutableList.<Path>of(),
         ImmutableList.<Path>of(),
-        CxxHeaders.builder().build(),
+        ImmutableList.<CxxHeaders>of(),
         CxxPlatforms.DEFAULT_DEBUG_PATH_SANITIZER);
 
     CxxCompilationDatabase compilationDatabase = CxxCompilationDatabase.createCompilationDatabase(
@@ -327,13 +335,13 @@ public class CxxCompilationDatabaseTest {
                 root + "/test.cpp",
                 ImmutableList.of(
                     "compiler",
-                    "-x",
-                    "c++-cpp-output",
-                    "-c",
                     "-I",
                     "foo/bar",
                     "-I",
                     "test",
+                    "-x",
+                    "c++-cpp-output",
+                    "-c",
                     "-o",
                     "test.o",
                     "test.cpp")));
